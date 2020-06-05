@@ -297,6 +297,38 @@ public enum Hasher {
         }
     },
 
+    SSHA1() {
+        @Override
+        public char[] hash(SecureString text) {
+            MessageDigest md = MessageDigests.sha1();
+            md.update(CharArrays.toUtf8Bytes(text.getChars()));
+            byte[] salt = generateSalt(8);
+            md.update(salt);
+            String hash = Base64.getEncoder().encodeToString(md.digest());
+            char[] result = new char[SSHA1_PREFIX.length() + 12 + hash.length()];
+            System.arraycopy(SSHA1_PREFIX.toCharArray(), 0, result, 0, SSHA1_PREFIX.length());
+            System.arraycopy(Base64.getEncoder().encodeToString(salt).toCharArray(), 0, result, SSHA1_PREFIX.length(), 12);
+            System.arraycopy(hash.toCharArray(), 0, result, SSHA1_PREFIX.length() + 12, hash.length());
+            return result;
+        }
+
+        @Override
+        public boolean verify(SecureString text, char[] hash) {
+            String hashStr = new String(hash);
+            if (hashStr.startsWith(SSHA1_PREFIX) == false) {
+                return false;
+            }
+            hashStr = hashStr.substring(SSHA1_PREFIX.length());
+            char[] saltAndHash = hashStr.toCharArray();
+            MessageDigest md = MessageDigests.sha1();
+            md.update(CharArrays.toUtf8Bytes(text.getChars()));
+            // Base64 string length : (4*(n/3)) rounded up to the next multiple of 4 because of padding, 12 for 8 bytes
+            md.update(Base64.getDecoder().decode(new String(saltAndHash, 0, 12)));
+            String computedHash = Base64.getEncoder().encodeToString(md.digest());
+            return CharArrays.constantTimeEquals(computedHash, new String(saltAndHash, 12, saltAndHash.length - 12));
+        }
+    },
+
     MD5() {
         @Override
         public char[] hash(SecureString text) {
@@ -367,6 +399,7 @@ public enum Hasher {
     private static final String BCRYPT_PREFIX = "$2a$";
     private static final String SHA1_PREFIX = "{SHA}";
     private static final String MD5_PREFIX = "{MD5}";
+    private static final String SSHA1_PREFIX = "{SSHA}";
     private static final String SSHA256_PREFIX = "{SSHA256}";
     private static final String PBKDF2_PREFIX = "{PBKDF2}";
     private static final int PBKDF2_DEFAULT_COST = 10000;
@@ -429,6 +462,8 @@ public enum Hasher {
                 return MD5;
             case "ssha256":
                 return SSHA256;
+            case "ssha1":
+                return SSHA1;
             case "noop":
             case "clear_text":
                 return NOOP;
@@ -458,6 +493,8 @@ public enum Hasher {
             return Hasher.MD5;
         } else if (CharArrays.charsBeginsWith(SSHA256_PREFIX, hash)) {
             return Hasher.SSHA256;
+        } else if (CharArrays.charsBeginsWith(SSHA1_PREFIX, hash)) {
+            return Hasher.SSHA1;
         } else {
             // This is either a non hashed password from cache or a corrupted hash string.
             return Hasher.NOOP;
@@ -549,7 +586,7 @@ public enum Hasher {
      */
     public static List<String> getAvailableAlgoStoredHash() {
         return Arrays.stream(Hasher.values()).map(Hasher::name).map(name -> name.toLowerCase(Locale.ROOT))
-            .filter(name -> (name.startsWith("pbkdf2") || name.startsWith("bcrypt")))
+            //.filter(name -> (name.startsWith("pbkdf2") || name.startsWith("bcrypt")))
             .collect(Collectors.toList());
     }
 
